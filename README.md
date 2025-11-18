@@ -19,11 +19,9 @@ Comprehensive process discovery, conformance checking, and model evaluation tool
 - Graphviz (for Petri net visualizations)
 
 ### Python Packages
-See `requirements.txt` for complete list. Key dependencies:
 - pm4py
 - pandas
 - numpy
-- matplotlib
 - graphviz
 
 ## Installation
@@ -31,7 +29,7 @@ See `requirements.txt` for complete list. Key dependencies:
 ### 1. Install Python Dependencies
 
 ```bash
-# Using virtual environment (recommended)
+# Using virtual environment
 python -m venv venv
 
 # Activate virtual environment
@@ -63,14 +61,14 @@ sudo apt-get install graphviz
 
 ### 3. Prepare Data
 
-Place your event log file in the `data/` folder:
+Event log file should be in the `data/` folder:
 ```
 data/BPI_Challenge_2017.xes.gz
 ```
 
 ## Configuration
 
-Edit the configuration section at the top of `bpic17_reworked.py` (lines 54-120):
+Configuration section at the top of `bpic17_reworked.py`
 
 ### Discovery Algorithm
 ```python
@@ -80,16 +78,16 @@ DISCOVERY_ALGO = "inductive"  # Options: "inductive", "heuristics", "alpha"
 ### Inductive Miner Variant (only for inductive)
 ```python
 INDUCTIVE_MINER_VARIANT = "IMf"  # Options: "IM", "IMf", "IMd"
-# "IM"  - Standard (balanced)
-# "IMf" - Infrequent (highest precision, filters noise)
-# "IMd" - Directly-follows (good precision)
+# "IM"  - Standard
+# "IMf" - Infrequent
+# "IMd" - Directly-follows
 ```
 
 ### Noise Filtering
 ```python
 NOISE_THRESHOLD = 0.05  # 0.0 to 1.0
 # 0.0  - Disabled (keep all activities)
-# 0.05 - Remove activities in < 5% of cases (recommended)
+# 0.05 - Remove activities in < 5% of cases
 # 0.10 - Aggressive filtering
 ```
 
@@ -103,8 +101,8 @@ PRECISION_LOG_MODE = "all"  # Options: "all", "accepted", "non_cancelled"
 
 ### Conformance Options
 ```python
-ALIGNMENTS_ENABLED = False  # True = compute alignment metrics (slow)
-EVAL_ON_DISCOVERY_LOG = False  # True = evaluate on filtered log only
+ALIGNMENTS_ENABLED = False      # True = compute alignment metrics
+EVAL_ON_DISCOVERY_LOG = False   # True = evaluate on filtered log only
 ```
 
 ### Output
@@ -124,7 +122,7 @@ python bpic17_reworked.py
 
 ### Example Configurations
 
-**1. Maximum Precision (recommended for BPIC 2017)**
+**1.**
 ```python
 DISCOVERY_ALGO = "inductive"
 INDUCTIVE_MINER_VARIANT = "IMf"
@@ -133,7 +131,7 @@ PRECISION_LOG_MODE = "accepted"
 ALIGNMENTS_ENABLED = False
 ```
 
-**2. Balanced Fitness/Precision**
+**2.**
 ```python
 DISCOVERY_ALGO = "inductive"
 INDUCTIVE_MINER_VARIANT = "IM"
@@ -141,7 +139,7 @@ NOISE_THRESHOLD = 0.0
 PRECISION_LOG_MODE = "all"
 ```
 
-**3. Fast Exploration (Heuristics)**
+**3.**
 ```python
 DISCOVERY_ALGO = "heuristics"
 NOISE_THRESHOLD = 0.0
@@ -217,7 +215,7 @@ Contains:
 - **Nodes**: Total places + transitions (lower = simpler)
 - **Density**: Arcs / nodes (lower = simpler)
 
-**Flexibility**
+**Generalization measured using flexibility**
 - Score = density × (1 + invisible_ratio)
 - Higher = more flexible/complex model
 
@@ -225,7 +223,7 @@ Contains:
 
 ### "Graphviz not found"
 - Ensure Graphviz is installed and in PATH
-- Restart terminal after installation
+- Restart terminal (and code editor) after installation
 
 ### "No cases remaining after preprocessing"
 - Loosen filtering criteria (set `PRECISION_LOG_MODE = "all"`)
@@ -238,13 +236,13 @@ Contains:
 - Reduce `MAX_PRECISION_SAMPLE_SIZE`
 
 ### Process hangs/takes too long
-- Disable alignments (most expensive operation)
-- Use fewer coverage values
+- Disable alignments
+- Use smaller sample size
 - Reduce parallel workers by modifying `max_workers` in code
 
 ## Understanding the Workflow
 
-1. **Load Data**: Reads XES log from `data/` folder
+1. **Load Data**: Read XES BPIC-17 log from `data/` folder
 2. **Preprocess**:
    - Drop missing timestamps and duplicates
    - Filter to complete cases
@@ -259,7 +257,6 @@ Contains:
    - Evaluate conformance (fitness & precision)
    - Compute structural metrics
    - Save Petri net visualization
-5. **Recommendation**: Select best model balancing fitness (~80%) and precision
 
 ## Advanced Usage
 
@@ -270,14 +267,6 @@ In `main()` function (line ~968):
 coverages = [1.0, 0.60, 0.30, 0.10, 0.01]  # Customize this list
 ```
 
-### Change Recommended Model Criteria
-
-Modify `FITTING_TOLERANCE_MIN` and `FITTING_TOLERANCE_MAX` (lines 100-102):
-```python
-FITTING_TOLERANCE_MIN = 70.0  # Lower = prioritize precision over fitness
-FITTING_TOLERANCE_MAX = 90.0  # Higher = allow more fitness variance
-```
-
 ### Disable Service Time Calculation
 
 Comment out line ~954 in `main()`:
@@ -285,37 +274,30 @@ Comment out line ~954 in `main()`:
 # compute_service_times(clean_log)
 ```
 
-## Performance Tips
-
-- **Fast iteration**: Disable alignments, use small coverage list
-- **High precision**: Use IMf variant, increase noise threshold, use "accepted" mode
-- **High fitness**: Use IM variant, no noise filtering, use "all" mode
-- **Production run**: Enable alignments for publication-quality metrics
-
 ## File Structure
 
 ```
 BPPSO/
 ├── bpic17_reworked.py      # Main analysis script
-├── requirements.txt         # Python dependencies
+├── requirements.txt        # Python dependencies
 ├── README.md               # This file
-├── data/
-│   └── BPI_Challenge_2017.xes.gz  # Event log
+├── data/                   # Event log
+│   └── BPI_Challenge_2017.xes.gz  
 ├── petri_nets/             # Petri net output folder (created automatically)
-│   ├── inductive_IMf/      # Inductive Miner IMf variant
-│   ├── inductive_IMd/      # Inductive Miner IMd variant
-│   ├── alpha/              # Alpha Miner
-│   └── heuristics/         # Heuristics Miner
+│   ├── inductive_IMf/      
+│   ├── inductive_IMd/      
+│   ├── alpha/              
+│   └── heuristics/         
 ├── bpmn_models/            # BPMN output folder (created automatically)
-│   ├── inductive_IMf/      # BPMN models from IMf
-│   ├── inductive_IMd/      # BPMN models from IMd
-│   ├── alpha/              # BPMN models from Alpha
-│   └── heuristics/         # BPMN models from Heuristics
+│   ├── inductive_IMf/      
+│   ├── inductive_IMd/      
+│   ├── alpha/              
+│   └── heuristics/         
 ├── results/                # Results folder (created automatically)
-│   ├── inductive_IMf/      # Text summaries for IMf
-│   ├── inductive_IMd/      # Text summaries for IMd
-│   ├── alpha/              # Text summaries for Alpha
-│   └── heuristics/         # Text summaries for Heuristics
+│   ├── inductive_IMf/      
+│   ├── inductive_IMd/      
+│   ├── alpha/              
+│   └── heuristics/         
 └── venv/                   # Virtual environment (optional)
 ```
 

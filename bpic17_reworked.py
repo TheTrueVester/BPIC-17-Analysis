@@ -60,7 +60,7 @@ from pm4py.objects.log.obj import EventLog
 #   "inductive"  -> Inductive Miner (default)
 #   "heuristics" -> Heuristics Miner
 #   "alpha"      -> Alpha Miner
-DISCOVERY_ALGO = "alpha"
+DISCOVERY_ALGO = "heuristics"
 
 # Inductive Miner variant (only used when DISCOVERY_ALGO = "inductive"):
 #   "IM"   -> Standard Inductive Miner (balanced fitness/precision)
@@ -99,7 +99,7 @@ EVAL_ON_DISCOVERY_LOG = False
 MAX_PRECISION_SAMPLE_SIZE = 200
 TARGET_FITTING_PERCENTAGE = 80.0
 FITTING_TOLERANCE_MIN = 75.0
-FITTING_TOLERANCE_MAX = 85.0
+FITTING_TOLERANCE_MAX = 100.0
 
 # Preprocessing constants
 MIN_EVENTS_PER_CASE = 2
