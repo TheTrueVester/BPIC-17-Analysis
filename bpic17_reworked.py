@@ -6,8 +6,8 @@ Features:
     Preprocessing:
         Drop missing timestamps / duplicates
         Keep only complete cases that reach a final state
-        Activity clustering into CL_* macro-activities
-        Outcome-based filtering on CL_* labels:
+        Activity clustering into CL_* macro-activities (optional, controlled by USE_CLUSTERING)
+        Outcome-based filtering on CL_* labels (only when clustering is enabled):
             - "all"            -> all complete cases
             - "accepted"       -> traces ending in CL_W_Complete_application or CL_W_Validate_application
             - "non_cancelled"  -> drop traces ending in CL_A_Cancelled or CL_A_Denied
@@ -60,13 +60,13 @@ from pm4py.objects.log.obj import EventLog
 #   "inductive"  -> Inductive Miner (default)
 #   "heuristics" -> Heuristics Miner
 #   "alpha"      -> Alpha Miner
-DISCOVERY_ALGO = "heuristics"
+DISCOVERY_ALGO = "inductive"
 
 # Inductive Miner variant (only used when DISCOVERY_ALGO = "inductive"):
 #   "IM"   -> Standard Inductive Miner (balanced fitness/precision)
 #   "IMf"  -> Inductive Miner - infrequent (filters noise)
 #   "IMd"  -> Inductive Miner - directly-follows
-INDUCTIVE_MINER_VARIANT = "IMd"
+INDUCTIVE_MINER_VARIANT = "IMf"
 
 # Noise filtering threshold (0.0 to 1.0):
 #   0.0  -> No filtering (keep all activities) (default)
@@ -82,13 +82,18 @@ RESULTS_DIR = "results"     # For text result summaries
 # Option to disable alignment-based metrics to save time
 ALIGNMENTS_ENABLED = True
 
+# Enable activity clustering:
+#   True  -> cluster activities into CL_* macro-activities (default)
+#   False -> use original activity labels without clustering
+USE_CLUSTERING = False
+
 # Outcome-based filtering mode on labels:
 #   "all"           -> all complete cases (default)
 #   "accepted"      -> only traces whose last clustered activity is in either:
 #                      CL_W_Complete_application or CL_W_Validate_application
 #   "non_cancelled" -> drop traces whose last clustered activity is in either:
 #                      CL_A_Cancelled or CL_A_Denied
-PRECISION_LOG_MODE = "accepted"
+PRECISION_LOG_MODE = "all"
 
 # Evaluation log choice for conformance:
 #   False -> evaluate using full unprocessed log (default)
@@ -285,7 +290,7 @@ def preprocess_log_df(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
     - drop missing timestamps
     - drop duplicates
     - keep complete cases (original labels)
-    - cluster activities into CL_* labels
+    - cluster activities into CL_* labels (if USE_CLUSTERING=True)
     - outcome-based filtering on clustered labels (PRECISION_LOG_MODE)
     - compute case durations, remove >99th percentile
     - drop cases with <2 events
@@ -309,11 +314,16 @@ def preprocess_log_df(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
     # 1) keep only complete cases (original labels)
     df = filter_to_complete_cases(df)
 
-    # 2) cluster into CL_* activities
-    df = cluster_activities_in_df(df)
-
-    # 3) apply outcome filter on clustered labels
-    df = filter_by_outcome_clustered(df, mode=PRECISION_LOG_MODE)
+    # 2) cluster into CL_* activities (conditional)
+    if USE_CLUSTERING:
+        df = cluster_activities_in_df(df)
+        # 3) apply outcome filter on clustered labels
+        df = filter_by_outcome_clustered(df, mode=PRECISION_LOG_MODE)
+    else:
+        print("[Clustering] Skipped (USE_CLUSTERING=False)")
+        # Skip outcome filtering when not clustering
+        if PRECISION_LOG_MODE != "all":
+            print(f"[Warning] PRECISION_LOG_MODE='{PRECISION_LOG_MODE}' ignored when USE_CLUSTERING=False")
 
     # 4) compute durations on clustered df
     df = df.sort_values(["case:concept:name", "time:timestamp"])
@@ -821,12 +831,15 @@ def analyze_single_coverage(clean_log: EventLog, cov: float) -> Dict[str, Any]:
     os.makedirs(petri_subdir, exist_ok=True)
     os.makedirs(bpmn_subdir, exist_ok=True)
     
-    # Build filename with algorithm, variant (if inductive), noise threshold, coverage, and trace count
+    # Build filename with clustering, mode, algorithm, variant (if inductive), noise threshold, coverage, and trace count
     traces_count = len(disc_log)
+    clustering_str = "clustered" if USE_CLUSTERING else "original"
+    mode_str = f"mode_{PRECISION_LOG_MODE}" if USE_CLUSTERING else "mode_all"
+    
     if DISCOVERY_ALGO == "inductive":
-        base_filename = f"{DISCOVERY_ALGO}_{INDUCTIVE_MINER_VARIANT}_noise{int(NOISE_THRESHOLD*100)}_cov{int(cov * 100)}_traces{traces_count}_{timestamp}"
+        base_filename = f"{clustering_str}_{mode_str}_{DISCOVERY_ALGO}_{INDUCTIVE_MINER_VARIANT}_noise{int(NOISE_THRESHOLD*100)}_cov{int(cov * 100)}_traces{traces_count}_{timestamp}"
     else:
-        base_filename = f"{DISCOVERY_ALGO}_noise{int(NOISE_THRESHOLD*100)}_cov{int(cov * 100)}_traces{traces_count}_{timestamp}"
+        base_filename = f"{clustering_str}_{mode_str}_{DISCOVERY_ALGO}_noise{int(NOISE_THRESHOLD*100)}_cov{int(cov * 100)}_traces{traces_count}_{timestamp}"
     
     # Save Petri net
     petri_filename = f"petri_{base_filename}.png"
@@ -881,6 +894,7 @@ def run_experiments(clean_df: pd.DataFrame, coverages: List[float]) -> List[Dict
     print(f"[CONFIG] DISCOVERY_ALGO = {DISCOVERY_ALGO}")
     if DISCOVERY_ALGO == "inductive":
         print(f"[CONFIG] INDUCTIVE_MINER_VARIANT = {INDUCTIVE_MINER_VARIANT}")
+    print(f"[CONFIG] USE_CLUSTERING = {USE_CLUSTERING}")
     print(f"[CONFIG] NOISE_THRESHOLD = {NOISE_THRESHOLD:.1%}")
     print(f"[CONFIG] ALIGNMENTS_ENABLED = {ALIGNMENTS_ENABLED}")
     print(f"[CONFIG] PRECISION_LOG_MODE = {PRECISION_LOG_MODE}")
@@ -916,10 +930,13 @@ def run_experiments(clean_df: pd.DataFrame, coverages: List[float]) -> List[Dict
     os.makedirs(results_subdir, exist_ok=True)
     
     # Build results filename with configuration info
+    clustering_str = "clustered" if USE_CLUSTERING else "original"
+    mode_str = f"mode_{PRECISION_LOG_MODE}" if USE_CLUSTERING else "mode_all"
+    
     if DISCOVERY_ALGO == "inductive":
-        results_filename = f"results_{DISCOVERY_ALGO}_{INDUCTIVE_MINER_VARIANT}_noise{int(NOISE_THRESHOLD*100)}_{timestamp}.txt"
+        results_filename = f"results_{clustering_str}_{mode_str}_{DISCOVERY_ALGO}_{INDUCTIVE_MINER_VARIANT}_noise{int(NOISE_THRESHOLD*100)}_{timestamp}.txt"
     else:
-        results_filename = f"results_{DISCOVERY_ALGO}_noise{int(NOISE_THRESHOLD*100)}_{timestamp}.txt"
+        results_filename = f"results_{clustering_str}_{mode_str}_{DISCOVERY_ALGO}_noise{int(NOISE_THRESHOLD*100)}_{timestamp}.txt"
     
     results_filepath = os.path.join(results_subdir, results_filename)
     
@@ -936,6 +953,7 @@ def run_experiments(clean_df: pd.DataFrame, coverages: List[float]) -> List[Dict
         f.write(f"Discovery Algorithm:       {DISCOVERY_ALGO}\n")
         if DISCOVERY_ALGO == "inductive":
             f.write(f"Inductive Miner Variant:   {INDUCTIVE_MINER_VARIANT}\n")
+        f.write(f"Use Clustering:            {USE_CLUSTERING}\n")
         f.write(f"Noise Threshold:           {NOISE_THRESHOLD:.1%}\n")
         f.write(f"Precision Log Mode:        {PRECISION_LOG_MODE}\n")
         f.write(f"Alignments Enabled:        {ALIGNMENTS_ENABLED}\n")
