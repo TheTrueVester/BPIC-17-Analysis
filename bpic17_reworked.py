@@ -60,13 +60,13 @@ from pm4py.objects.log.obj import EventLog
 #   "inductive"  -> Inductive Miner (default)
 #   "heuristics" -> Heuristics Miner
 #   "alpha"      -> Alpha Miner
-DISCOVERY_ALGO = "inductive"
+DISCOVERY_ALGO = "alpha"
 
 # Inductive Miner variant (only used when DISCOVERY_ALGO = "inductive"):
 #   "IM"   -> Standard Inductive Miner (balanced fitness/precision)
 #   "IMf"  -> Inductive Miner - infrequent (filters noise)
 #   "IMd"  -> Inductive Miner - directly-follows
-INDUCTIVE_MINER_VARIANT = "IMf"
+INDUCTIVE_MINER_VARIANT = "IMd"
 
 # Noise filtering threshold (0.0 to 1.0):
 #   0.0  -> No filtering (keep all activities) (default)
@@ -470,6 +470,77 @@ def compute_service_times(log: EventLog) -> Dict[str, float]:
     for k, v in soj.items():
         print(f"{k}: {v:.2f}")
     return soj
+
+
+def show_variant_coverage(log: EventLog, target_coverage: float = 0.90):
+    """
+    Display variant statistics:
+    - Top 5 variants with their case counts
+    - Last variant that has more than 1 case
+    - Total variants and coverage up to target_coverage
+    """
+    print(f"\n=== VARIANT COVERAGE ANALYSIS (Target: {target_coverage:.0%}) ===")
+    
+    variants = stats.get_variants(log)
+    total_cases = len(log)
+    
+    if total_cases == 0:
+        print("No cases in log.")
+        return
+    
+    # Sort variants by frequency (descending)
+    sorted_variants = sorted(variants.items(), key=lambda x: x[1], reverse=True)
+    
+    print(f"Total cases: {total_cases}")
+    print(f"Total variants: {len(variants)}")
+    print()
+    
+    # Show top 5 variants
+    print("TOP 5 VARIANTS:")
+    print(f"{'Rank':<6} {'Cases':<8} {'% of Total':<12} {'Variant Preview'}")
+    print("-" * 80)
+    
+    for idx, (variant, count) in enumerate(sorted_variants[:5], 1):
+        coverage = count / total_cases
+        variant_preview = ','.join(list(variant)[:3])
+        if len(variant) > 3:
+            variant_preview += "..."
+        print(f"{idx:<6} {count:<8} {coverage:<12.2%} {variant_preview}")
+    
+    # Find last variant with more than 1 case
+    last_multi_case_idx = None
+    last_multi_case_variant = None
+    last_multi_case_count = None
+    
+    for idx, (variant, count) in enumerate(sorted_variants, 1):
+        if count > 1:
+            last_multi_case_idx = idx
+            last_multi_case_variant = variant
+            last_multi_case_count = count
+        else:
+            break
+    
+    if last_multi_case_idx:
+        print()
+        print("LAST VARIANT WITH >1 CASE:")
+        print(f"{'Rank':<6} {'Cases':<8} {'% of Total':<12} {'Variant Preview'}")
+        print("-" * 80)
+        coverage = last_multi_case_count / total_cases
+        variant_preview = ','.join(list(last_multi_case_variant)[:3])
+        if len(last_multi_case_variant) > 3:
+            variant_preview += "..."
+        print(f"{last_multi_case_idx:<6} {last_multi_case_count:<8} {coverage:<12.2%} {variant_preview}")
+    
+    # Calculate coverage to target
+    cumulative_cases = 0
+    for idx, (variant, count) in enumerate(sorted_variants, 1):
+        cumulative_cases += count
+        cumulative_coverage = cumulative_cases / total_cases
+        if cumulative_coverage >= target_coverage:
+            print()
+            print(f"To reach {target_coverage:.0%} coverage: {idx} variants needed (covering {cumulative_cases}/{total_cases} cases)")
+            break
+
 
 
 
@@ -1078,6 +1149,8 @@ def main():
         raise FileNotFoundError(f"Log file not found: {log_path}")
 
     raw = load_log_xes(log_path)
+    show_variant_coverage(raw, target_coverage=0.90)
+    
     df = log_to_dataframe(raw)
     clean_df, case_durations = preprocess_log_df(df)
     clean_log = dataframe_to_event_log(clean_df)
