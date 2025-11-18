@@ -11,6 +11,7 @@ Features:
             - "all"            -> all complete cases
             - "accepted"       -> traces ending in CL_W_Complete_application or CL_W_Validate_application
             - "non_cancelled"  -> drop traces ending in CL_A_Cancelled or CL_A_Denied
+            - "frequent_only"  -> only keep traces whose variant appears more than once
         Remove duration outliers (above 99th percentile)
         Remove cases with < 2 events
     Stats:
@@ -88,11 +89,12 @@ ALIGNMENTS_ENABLED = True
 USE_CLUSTERING = False
 
 # Outcome-based filtering mode on labels:
-#   "all"           -> all complete cases (default)
-#   "accepted"      -> only traces whose last clustered activity is in either:
-#                      CL_W_Complete_application or CL_W_Validate_application
-#   "non_cancelled" -> drop traces whose last clustered activity is in either:
-#                      CL_A_Cancelled or CL_A_Denied
+#   "all"              -> all complete cases (default)
+#   "accepted"         -> only traces whose last clustered activity is in either:
+#                         CL_W_Complete_application or CL_W_Validate_application
+#   "non_cancelled"    -> drop traces whose last clustered activity is in either:
+#                         CL_A_Cancelled or CL_A_Denied
+#   "frequent_only"    -> only keep traces whose variant appears more than once
 PRECISION_LOG_MODE = "all"
 
 # Evaluation log choice for conformance:
@@ -124,8 +126,8 @@ print(f"[SEED] Global seed set to {GLOBAL_SEED}")
 # Validate configuration
 if DISCOVERY_ALGO not in ["inductive", "heuristics", "alpha"]:
     raise ValueError(f"Invalid DISCOVERY_ALGO: {DISCOVERY_ALGO}. Must be 'inductive', 'heuristics', or 'alpha'")
-if PRECISION_LOG_MODE not in ["all", "accepted", "non_cancelled"]:
-    raise ValueError(f"Invalid PRECISION_LOG_MODE: {PRECISION_LOG_MODE}. Must be 'all', 'accepted', or 'non_cancelled'")
+if PRECISION_LOG_MODE not in ["all", "accepted", "non_cancelled", "frequent_only"]:
+    raise ValueError(f"Invalid PRECISION_LOG_MODE: {PRECISION_LOG_MODE}. Must be 'all', 'accepted', 'non_cancelled', or 'frequent_only'")
 if INDUCTIVE_MINER_VARIANT not in ["IM", "IMf", "IMd"]:
     raise ValueError(f"Invalid INDUCTIVE_MINER_VARIANT: {INDUCTIVE_MINER_VARIANT}. Must be 'IM', 'IMf', or 'IMd'")
 if not 0.0 <= NOISE_THRESHOLD <= 1.0:
@@ -196,9 +198,10 @@ def filter_to_complete_cases(df: pd.DataFrame,
     after = df2[case_col].nunique()
 
     if before > 0:
-        print(f"[Complete cases] Kept {after}/{before} ({after/before:.1%})")
+        dropped = before - after
+        print(f"[Complete cases filter] Kept {after}/{before} cases ({after/before:.1%}), dropped {dropped} incomplete cases")
     else:
-        print(f"[Complete cases] Kept {after}/0 (N/A)")
+        print(f"[Complete cases filter] Kept {after}/0 (N/A)")
     return df2
 
 
@@ -217,12 +220,36 @@ def filter_by_outcome_clustered(
                                CL_W_Complete_application or CL_W_Validate_application
             "non_cancelled" -> drop traces whose last clustered activity is in either:
                                CL_A_Cancelled or CL_A_Denied
+            "frequent_only" -> only keep traces whose variant appears more than once
     """
     if mode == "all":
         return df
 
     df = df.copy()
     df = df.sort_values([case_col, "time:timestamp"])
+
+    if mode == "frequent_only":
+        # Get variant for each case
+        from pm4py.statistics.variants.pandas import get as variants_get
+        variants_dict = variants_get.get_variants_count(df, parameters={
+            constants.PARAMETER_CONSTANT_CASEID_KEY: case_col,
+            constants.PARAMETER_CONSTANT_ACTIVITY_KEY: activity_col
+        })
+        
+        # Keep only variants with count > 1
+        frequent_variants = {v for v, count in variants_dict.items() if count > 1}
+        
+        # Map each case to its variant
+        case_to_variant = df.groupby(case_col)[activity_col].apply(lambda x: tuple(x))
+        keep_cases = set(case_to_variant[case_to_variant.isin(frequent_variants)].index)
+        
+        before = df[case_col].nunique()
+        df = df[df[case_col].isin(keep_cases)]
+        after = df[case_col].nunique()
+        dropped = before - after
+        
+        print(f"[Outcome filter: frequent_only] Kept {after}/{before} cases ({after/before:.1%}), dropped {dropped} cases with unique variants")
+        return df
 
     last_evt = df.groupby(case_col).tail(1)[[case_col, activity_col]]
 
@@ -250,8 +277,9 @@ def filter_by_outcome_clustered(
     before = df[case_col].nunique()
     df = df[df[case_col].isin(keep_cases)]
     after = df[case_col].nunique()
+    dropped = before - after
 
-    print(f"[Outcome filter (clustered)] Mode='{mode}' ({desc}): kept {after}/{before} cases ({after/before:.1%})")
+    print(f"[Outcome filter: {mode}] {desc}: kept {after}/{before} cases ({after/before:.1%}), dropped {dropped} cases")
     return df
 
 
@@ -305,11 +333,13 @@ def preprocess_log_df(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
 
     before = len(df)
     df = df.dropna(subset=["time:timestamp"])
-    print(f"Dropped missing timestamps: {before - len(df)}")
+    dropped_timestamps = before - len(df)
+    print(f"[Timestamp filter] Dropped {dropped_timestamps} events with missing timestamps")
 
     before = len(df)
     df = df.drop_duplicates()
-    print(f"Dropped duplicates: {before - len(df)}")
+    dropped_duplicates = before - len(df)
+    print(f"[Duplicate filter] Dropped {dropped_duplicates} duplicate events")
 
     # 1) keep only complete cases (original labels)
     df = filter_to_complete_cases(df)
@@ -321,9 +351,11 @@ def preprocess_log_df(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
         df = filter_by_outcome_clustered(df, mode=PRECISION_LOG_MODE)
     else:
         print("[Clustering] Skipped (USE_CLUSTERING=False)")
-        # Skip outcome filtering when not clustering
-        if PRECISION_LOG_MODE != "all":
-            print(f"[Warning] PRECISION_LOG_MODE='{PRECISION_LOG_MODE}' ignored when USE_CLUSTERING=False")
+        # Apply frequent_only filter even without clustering if specified
+        if PRECISION_LOG_MODE == "frequent_only":
+            df = filter_by_outcome_clustered(df, mode=PRECISION_LOG_MODE)
+        elif PRECISION_LOG_MODE != "all":
+            print(f"[Warning] PRECISION_LOG_MODE='{PRECISION_LOG_MODE}' ignored when USE_CLUSTERING=False (only 'all' and 'frequent_only' supported)")
 
     # 4) compute durations on clustered df
     df = df.sort_values(["case:concept:name", "time:timestamp"])
@@ -339,12 +371,12 @@ def preprocess_log_df(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
         long_cases = []
 
     df = df[~df["case:concept:name"].isin(long_cases)]
-    print(f"Dropped long-duration cases (>{DURATION_OUTLIER_PERCENTILE:.0%} pct): {len(long_cases)}")
+    print(f"[Duration filter] Dropped {len(long_cases)} cases exceeding {DURATION_OUTLIER_PERCENTILE:.0%} percentile duration")
 
     counts = df["case:concept:name"].value_counts()
     short = counts[counts < MIN_EVENTS_PER_CASE].index
     df = df[~df["case:concept:name"].isin(short)]
-    print(f"Dropped short cases (<{MIN_EVENTS_PER_CASE} events): {len(short)}")
+    print(f"[Event count filter] Dropped {len(short)} cases with <{MIN_EVENTS_PER_CASE} events")
 
     # Filter case_durations to match remaining cases in df
     remaining_cases = df["case:concept:name"].unique()
@@ -482,7 +514,9 @@ def show_variant_coverage(log: EventLog, target_coverage: float = 0.90):
     print(f"\n=== VARIANT COVERAGE ANALYSIS (Target: {target_coverage:.0%}) ===")
     
     variants = stats.get_variants(log)
-    total_cases = len(log)
+    
+    # Calculate total cases from variant counts (more reliable than len(log))
+    total_cases = sum(variants.values())
     
     if total_cases == 0:
         print("No cases in log.")
@@ -511,12 +545,14 @@ def show_variant_coverage(log: EventLog, target_coverage: float = 0.90):
     last_multi_case_idx = None
     last_multi_case_variant = None
     last_multi_case_count = None
+    total_multi_case_count = 0
     
     for idx, (variant, count) in enumerate(sorted_variants, 1):
         if count > 1:
             last_multi_case_idx = idx
             last_multi_case_variant = variant
             last_multi_case_count = count
+            total_multi_case_count += count
         else:
             break
     
@@ -530,6 +566,11 @@ def show_variant_coverage(log: EventLog, target_coverage: float = 0.90):
         if len(last_multi_case_variant) > 3:
             variant_preview += "..."
         print(f"{last_multi_case_idx:<6} {last_multi_case_count:<8} {coverage:<12.2%} {variant_preview}")
+        
+        # Show total coverage of all variants with >1 case
+        multi_case_coverage = total_multi_case_count / total_cases
+        print()
+        print(f"All variants with >1 case: {last_multi_case_idx} variants covering {total_multi_case_count}/{total_cases} cases ({multi_case_coverage:.2%})")
     
     # Calculate coverage to target
     cumulative_cases = 0
