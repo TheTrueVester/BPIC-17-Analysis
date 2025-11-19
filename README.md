@@ -40,6 +40,9 @@ source venv/bin/activate
 
 # Install packages
 pip install -r requirements.txt
+
+# If you experience version compatibility issues, use the lock file instead:
+pip install -r requirements-lock.txt
 ```
 
 ### 2. Install Graphviz

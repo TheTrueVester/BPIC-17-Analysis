@@ -986,9 +986,9 @@ def analyze_single_coverage(clean_log: EventLog, cov: float) -> Dict[str, Any]:
 
 def analyze_single_coverage_worker(args):
     """
-    Worker wrapper for ProcessPoolExecutor.
+    Worker wrapper for ProcessPoolExecutor
 
-    We pass a cleaned DataFrame + coverage to the subprocess,
+    Pass a cleaned DataFrame + coverage to the subprocess,
     reconstruct the EventLog there, and then call analyze_single_coverage().
     """
     # Set seed in worker process for reproducibility
