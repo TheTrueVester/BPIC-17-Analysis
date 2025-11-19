@@ -2,6 +2,8 @@
 
 Comprehensive process discovery, conformance checking, and model evaluation tool for the BPI Challenge 2017 dataset.
 
+**FYI:** The commit count in this repository is relatively low because the project was largely developed before being uploaded to GitHub. Most of the work existed locally and was pushed only once it was nearly complete.
+
 ## Features
 
 - **Process Discovery Algorithms**: Inductive Miner (with variants), Heuristics Miner, Alpha Miner
