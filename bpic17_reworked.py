@@ -61,19 +61,19 @@ from pm4py.objects.log.obj import EventLog
 #   "inductive"  -> Inductive Miner (default)
 #   "heuristics" -> Heuristics Miner
 #   "alpha"      -> Alpha Miner
-DISCOVERY_ALGO = "alpha"
+DISCOVERY_ALGO = "inductive"
 
 # Inductive Miner variant (only used when DISCOVERY_ALGO = "inductive"):
 #   "IM"   -> Standard Inductive Miner (balanced fitness/precision)
 #   "IMf"  -> Inductive Miner - infrequent (filters noise)
 #   "IMd"  -> Inductive Miner - directly-follows
-INDUCTIVE_MINER_VARIANT = "IMd"
+INDUCTIVE_MINER_VARIANT = "IM"
 
 # Noise filtering threshold (0.0 to 1.0):
 #   0.0  -> No filtering (keep all activities) (default)
 #   0.05 -> Filter activities appearing in < 5% of cases 
 #   0.10 -> More aggressive filtering
-NOISE_THRESHOLD = 0.1
+NOISE_THRESHOLD = 0.0
 
 # Output directories
 OUTPUT_DIR = "petri_nets"   # For Petri net visualizations
@@ -95,7 +95,8 @@ USE_CLUSTERING = False
 #   "non_cancelled"    -> drop traces whose last clustered activity is in either:
 #                         CL_A_Cancelled or CL_A_Denied
 #   "frequent_only"    -> only keep traces whose variant appears more than once
-PRECISION_LOG_MODE = "all"
+#   You can combine filters by using a list, e.g., ["accepted", "frequent_only"]
+PRECISION_LOG_MODE = ["all"]
 
 # Evaluation log choice for conformance:
 #   False -> evaluate using full unprocessed log (default)
@@ -126,8 +127,19 @@ print(f"[SEED] Global seed set to {GLOBAL_SEED}")
 # Validate configuration
 if DISCOVERY_ALGO not in ["inductive", "heuristics", "alpha"]:
     raise ValueError(f"Invalid DISCOVERY_ALGO: {DISCOVERY_ALGO}. Must be 'inductive', 'heuristics', or 'alpha'")
-if PRECISION_LOG_MODE not in ["all", "accepted", "non_cancelled", "frequent_only"]:
-    raise ValueError(f"Invalid PRECISION_LOG_MODE: {PRECISION_LOG_MODE}. Must be 'all', 'accepted', 'non_cancelled', or 'frequent_only'")
+
+# Validate PRECISION_LOG_MODE (can be string or list)
+valid_modes = ["all", "accepted", "non_cancelled", "frequent_only"]
+if isinstance(PRECISION_LOG_MODE, str):
+    if PRECISION_LOG_MODE not in valid_modes:
+        raise ValueError(f"Invalid PRECISION_LOG_MODE: {PRECISION_LOG_MODE}. Must be one of {valid_modes}")
+elif isinstance(PRECISION_LOG_MODE, list):
+    for mode in PRECISION_LOG_MODE:
+        if mode not in valid_modes:
+            raise ValueError(f"Invalid PRECISION_LOG_MODE element: {mode}. Must be one of {valid_modes}")
+else:
+    raise ValueError(f"Invalid PRECISION_LOG_MODE type: {type(PRECISION_LOG_MODE)}. Must be string or list")
+
 if INDUCTIVE_MINER_VARIANT not in ["IM", "IMf", "IMd"]:
     raise ValueError(f"Invalid INDUCTIVE_MINER_VARIANT: {INDUCTIVE_MINER_VARIANT}. Must be 'IM', 'IMf', or 'IMd'")
 if not 0.0 <= NOISE_THRESHOLD <= 1.0:
@@ -207,79 +219,102 @@ def filter_to_complete_cases(df: pd.DataFrame,
 
 def filter_by_outcome_clustered(
     df: pd.DataFrame,
-    mode: str = "all",
+    mode = "all",
     case_col: str = "case:concept:name",
     activity_col: str = "concept:name"
 ) -> pd.DataFrame:
     """
     Outcome-based filtering using CL_* labels (after clustering).
 
-    mode:
+    mode: String or list of strings. Supported modes:
             "all"           -> all complete cases (default)
             "accepted"      -> only traces whose last clustered activity is in either:
                                CL_W_Complete_application or CL_W_Validate_application
             "non_cancelled" -> drop traces whose last clustered activity is in either:
                                CL_A_Cancelled or CL_A_Denied
             "frequent_only" -> only keep traces whose variant appears more than once
+            Or a list combining multiple filters, e.g., ["accepted", "frequent_only"]
     """
-    if mode == "all":
+    # Convert single mode to list for uniform processing
+    if isinstance(mode, str):
+        modes = [mode]
+    else:
+        modes = mode
+    
+    # If "all" is in modes, return df unchanged
+    if "all" in modes:
         return df
 
     df = df.copy()
     df = df.sort_values([case_col, "time:timestamp"])
-
-    if mode == "frequent_only":
-        # Get variant for each case
-        from pm4py.statistics.variants.pandas import get as variants_get
-        variants_dict = variants_get.get_variants_count(df, parameters={
-            constants.PARAMETER_CONSTANT_CASEID_KEY: case_col,
-            constants.PARAMETER_CONSTANT_ACTIVITY_KEY: activity_col
-        })
+    
+    # Apply each filter sequentially
+    for m in modes:
+        if m == "frequent_only":
+            # Get variant for each case
+            from pm4py.statistics.variants.pandas import get as variants_get
+            variants_dict = variants_get.get_variants_count(df, parameters={
+                constants.PARAMETER_CONSTANT_CASEID_KEY: case_col,
+                constants.PARAMETER_CONSTANT_ACTIVITY_KEY: activity_col
+            })
+            
+            # Keep only variants with count > 1
+            frequent_variants = {v for v, count in variants_dict.items() if count > 1}
+            
+            # Map each case to its variant
+            case_to_variant = df.groupby(case_col)[activity_col].apply(lambda x: tuple(x))
+            keep_cases = set(case_to_variant[case_to_variant.isin(frequent_variants)].index)
+            
+            before = df[case_col].nunique()
+            df = df[df[case_col].isin(keep_cases)]
+            after = df[case_col].nunique()
+            dropped = before - after
+            
+            print(f"[Outcome filter: frequent_only] Kept {after}/{before} cases ({after/before:.1%}), dropped {dropped} cases with unique variants")
         
-        # Keep only variants with count > 1
-        frequent_variants = {v for v, count in variants_dict.items() if count > 1}
+        elif m == "accepted":
+            last_evt = df.groupby(case_col).tail(1)[[case_col, activity_col]]
+            accepted_ends = {
+                "CL_W_Complete_application",
+                "CL_W_Validate_application",
+            }
+            keep_cases = set(
+                last_evt.loc[last_evt[activity_col].isin(accepted_ends), case_col]
+            )
+            desc = "only successfully completed / validated applications"
+            
+            before = df[case_col].nunique()
+            df = df[df[case_col].isin(keep_cases)]
+            after = df[case_col].nunique()
+            dropped = before - after
+            
+            print(f"[Outcome filter: accepted] {desc}: kept {after}/{before} cases ({after/before:.1%}), dropped {dropped} cases")
         
-        # Map each case to its variant
-        case_to_variant = df.groupby(case_col)[activity_col].apply(lambda x: tuple(x))
-        keep_cases = set(case_to_variant[case_to_variant.isin(frequent_variants)].index)
+        elif m == "non_cancelled":
+            last_evt = df.groupby(case_col).tail(1)[[case_col, activity_col]]
+            negative_ends = {
+                "CL_A_Cancelled",
+                "CL_A_Denied",
+            }
+            keep_cases = set(
+                last_evt.loc[~last_evt[activity_col].isin(negative_ends), case_col]
+            )
+            desc = "non-cancelled, non-denied clustered cases"
+            
+            before = df[case_col].nunique()
+            df = df[df[case_col].isin(keep_cases)]
+            after = df[case_col].nunique()
+            dropped = before - after
+            
+            print(f"[Outcome filter: non_cancelled] {desc}: kept {after}/{before} cases ({after/before:.1%}), dropped {dropped} cases")
         
-        before = df[case_col].nunique()
-        df = df[df[case_col].isin(keep_cases)]
-        after = df[case_col].nunique()
-        dropped = before - after
+        elif m == "all":
+            # Already handled above, but included for completeness
+            continue
         
-        print(f"[Outcome filter: frequent_only] Kept {after}/{before} cases ({after/before:.1%}), dropped {dropped} cases with unique variants")
-        return df
+        else:
+            raise ValueError(f"Unknown PRECISION_LOG_MODE for clustered filter: {m}")
 
-    last_evt = df.groupby(case_col).tail(1)[[case_col, activity_col]]
-
-    if mode == "accepted":
-        accepted_ends = {
-            "CL_W_Complete_application",
-            "CL_W_Validate_application",
-        }
-        keep_cases = set(
-            last_evt.loc[last_evt[activity_col].isin(accepted_ends), case_col]
-        )
-        desc = "only successfully completed / validated applications"
-    elif mode == "non_cancelled":
-        negative_ends = {
-            "CL_A_Cancelled",
-            "CL_A_Denied",
-        }
-        keep_cases = set(
-            last_evt.loc[~last_evt[activity_col].isin(negative_ends), case_col]
-        )
-        desc = "non-cancelled, non-denied clustered cases"
-    else:
-        raise ValueError(f"Unknown PRECISION_LOG_MODE for clustered filter: {mode}")
-
-    before = df[case_col].nunique()
-    df = df[df[case_col].isin(keep_cases)]
-    after = df[case_col].nunique()
-    dropped = before - after
-
-    print(f"[Outcome filter: {mode}] {desc}: kept {after}/{before} cases ({after/before:.1%}), dropped {dropped} cases")
     return df
 
 
@@ -1200,9 +1235,9 @@ def main():
     compute_service_times(clean_log)
 
     if ALIGNMENTS_ENABLED:
-        coverages = [0.60, 0.30, 0.20, 0.10, 0.01]
+        coverages = [1.00, 0.60, 0.30, 0.20, 0.10, 0.01]
     else:
-        coverages = [1.0, 0.60, 0.30, 0.10, 0.01]
+        coverages = [1.00, 0.60, 0.30, 0.10, 0.01]
     
     # Validate coverage values
     for cov in coverages:
