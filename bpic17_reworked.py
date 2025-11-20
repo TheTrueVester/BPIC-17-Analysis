@@ -73,7 +73,7 @@ INDUCTIVE_MINER_VARIANT = "IM"
 #   0.0  -> No filtering (keep all activities) (default)
 #   0.05 -> Filter activities appearing in < 5% of cases 
 #   0.10 -> More aggressive filtering
-NOISE_THRESHOLD = 0.0
+NOISE_THRESHOLD = 0.05
 
 # Output directories
 OUTPUT_DIR = "petri_nets"   # For Petri net visualizations
@@ -96,7 +96,7 @@ USE_CLUSTERING = True
 #                         CL_A_Cancelled or CL_A_Denied
 #   "frequent_only"    -> only keep traces whose variant appears more than once
 #   You can combine filters by using a list, e.g., ["accepted", "frequent_only"]
-PRECISION_LOG_MODE = ["frequent_only"]
+PRECISION_LOG_MODE = ["frequent_only", "accepted"]
 
 # Evaluation log choice for conformance:
 #   False -> evaluate using full unprocessed log (default)
@@ -104,7 +104,7 @@ PRECISION_LOG_MODE = ["frequent_only"]
 EVAL_ON_DISCOVERY_LOG = False
 
 # Sampling and threshold constants
-MAX_PRECISION_SAMPLE_SIZE = 200
+MAX_PRECISION_SAMPLE_SIZE = 200000
 TARGET_FITTING_PERCENTAGE = 80.0
 FITTING_TOLERANCE_MIN = 75.0
 FITTING_TOLERANCE_MAX = 100.0
@@ -1277,6 +1277,8 @@ def main():
     compute_service_times(clean_log)
 
     if ALIGNMENTS_ENABLED:
+        #coverages = [0.55, 0.50, 0.45, 0.40, 0.35]
+        #coverages = [0.60, 0.30, 0.20, 0.10, 0.01]
         coverages = [1.00, 0.60, 0.30, 0.20, 0.10, 0.01]
     else:
         coverages = [1.00, 0.60, 0.30, 0.10, 0.01]
