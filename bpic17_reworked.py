@@ -86,7 +86,7 @@ ALIGNMENTS_ENABLED = True
 # Enable activity clustering:
 #   True  -> cluster activities into CL_* macro-activities (default)
 #   False -> use original activity labels without clustering
-USE_CLUSTERING = False
+USE_CLUSTERING = True
 
 # Outcome-based filtering mode on labels:
 #   "all"              -> all complete cases (default)
@@ -96,7 +96,7 @@ USE_CLUSTERING = False
 #                         CL_A_Cancelled or CL_A_Denied
 #   "frequent_only"    -> only keep traces whose variant appears more than once
 #   You can combine filters by using a list, e.g., ["accepted", "frequent_only"]
-PRECISION_LOG_MODE = ["all"]
+PRECISION_LOG_MODE = ["frequent_only"]
 
 # Evaluation log choice for conformance:
 #   False -> evaluate using full unprocessed log (default)
@@ -387,10 +387,28 @@ def preprocess_log_df(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
     else:
         print("[Clustering] Skipped (USE_CLUSTERING=False)")
         # Apply frequent_only filter even without clustering if specified
-        if PRECISION_LOG_MODE == "frequent_only":
-            df = filter_by_outcome_clustered(df, mode=PRECISION_LOG_MODE)
-        elif PRECISION_LOG_MODE != "all":
-            print(f"[Warning] PRECISION_LOG_MODE='{PRECISION_LOG_MODE}' ignored when USE_CLUSTERING=False (only 'all' and 'frequent_only' supported)")
+        # Normalize mode to list for uniform checking
+        mode_list = PRECISION_LOG_MODE if isinstance(PRECISION_LOG_MODE, list) else [PRECISION_LOG_MODE]
+        
+        # Check if any mode requires clustering
+        requires_clustering = {"accepted", "non_cancelled"}
+        has_frequent_only = "frequent_only" in mode_list
+        has_all = "all" in mode_list
+        needs_clustering = any(m in requires_clustering for m in mode_list)
+        
+        if has_all:
+            # "all" means no filtering, skip
+            pass
+        elif has_frequent_only and not needs_clustering:
+            # Only frequent_only (or frequent_only + all), which works without clustering
+            df = filter_by_outcome_clustered(df, mode="frequent_only")
+        elif needs_clustering:
+            # Contains accepted or non_cancelled which need clustering
+            print(f"[Warning] PRECISION_LOG_MODE='{PRECISION_LOG_MODE}' contains modes requiring clustering ('accepted', 'non_cancelled')")
+            print(f"[Warning] These modes are ignored when USE_CLUSTERING=False")
+            # Still apply frequent_only if present
+            if has_frequent_only:
+                df = filter_by_outcome_clustered(df, mode="frequent_only")
 
     # 4) compute durations on clustered df
     df = df.sort_values(["case:concept:name", "time:timestamp"])
@@ -866,6 +884,7 @@ def evaluate_model_token_based(log: EventLog, net, im, fm):
     Token-based conformance:
     - fitness on eval_log (full or restricted cleaned log)
     - precision on a sampled eval_log (max 200 traces)
+    - generalization on eval_log
 
     pm4py.precision_token_based_replay internally uses an
     ETConformance-style token approach.
@@ -881,10 +900,12 @@ def evaluate_model_token_based(log: EventLog, net, im, fm):
             "percentage_of_fitting_traces": 0.0,
         }
         prec = 1.0  # empty log / empty behaviour = trivially precise
+        gen = 1.0  # empty log = trivially general
         sample = log
         print("Fitness (TBR):", fit)
         print("Precision (TBR / ETConformance-style):", prec)
-        return fit, prec, sample
+        print("Generalization (TBR):", gen)
+        return fit, prec, gen, sample
 
     fit = pm4py.fitness_token_based_replay(log, net, im, fm)
     print("Fitness (TBR):", fit)
@@ -900,8 +921,12 @@ def evaluate_model_token_based(log: EventLog, net, im, fm):
     print(f"Computing TBR precision on {len(sample)} traces")
     prec = pm4py.precision_token_based_replay(sample, net, im, fm)
     print("Precision (TBR / ETConformance-style):", prec)
+    
+    print(f"Computing TBR generalization on {len(log)} traces")
+    gen = pm4py.generalization_tbr(log, net, im, fm)
+    print("Generalization (TBR):", gen)
 
-    return fit, prec, sample
+    return fit, prec, gen, sample
 
 
 def evaluate_model_alignments(sample_log: EventLog, net, im, fm):
@@ -912,15 +937,27 @@ def evaluate_model_alignments(sample_log: EventLog, net, im, fm):
 
     This is much more expensive than token-based, so we only compute it
     on a small sample (up to 200 traces).
+    
+    Returns (None, None) if the Petri net is not sound (e.g., from Heuristics Miner).
     """
     print("\n=== ALIGNMENT-BASED CONFORMANCE ===")
-    fit = pm4py.fitness_alignments(sample_log, net, im, fm)
-    prec = pm4py.precision_alignments(sample_log, net, im, fm)
+    try:
+        fit = pm4py.fitness_alignments(sample_log, net, im, fm)
+        prec = pm4py.precision_alignments(sample_log, net, im, fm)
 
-    print("Alignment fitness:", fit)
-    print("Alignment precision:", prec)
+        print("Alignment fitness:", fit)
+        print("Alignment precision:", prec)
 
-    return fit, prec
+        return fit, prec
+    except Exception as e:
+        error_msg = str(e)
+        if "not a easy sound net" in error_msg or "soundness" in error_msg.lower():
+            print(f"[Warning] Alignment-based metrics skipped: Petri net is not sound")
+            print(f"[Warning] This is common with Heuristics Miner - use token-based metrics instead")
+            return None, None
+        else:
+            # Re-raise unexpected errors
+            raise
 
 
 
@@ -950,7 +987,7 @@ def analyze_single_coverage(clean_log: EventLog, cov: float) -> Dict[str, Any]:
     # Decide on which log to evaluate conformance
     eval_log = disc_log if EVAL_ON_DISCOVERY_LOG else clean_log
 
-    fit_tbr, prec_tbr, sample = evaluate_model_token_based(eval_log, net, im, fm)
+    fit_tbr, prec_tbr, gen_tbr, sample = evaluate_model_token_based(eval_log, net, im, fm)
 
     if ALIGNMENTS_ENABLED:
         fit_align, prec_align = evaluate_model_alignments(sample, net, im, fm)
@@ -1006,6 +1043,7 @@ def analyze_single_coverage(clean_log: EventLog, cov: float) -> Dict[str, Any]:
         "tbr_fit": fit_tbr.get("log_fitness"),
         "tbr_fitting": fit_tbr.get("perc_fit_traces"),
         "tbr_prec": prec_tbr,
+        "tbr_gen": gen_tbr,
         "align_fit": align_fit_log,
         "align_fitting": align_fit_traces,
         "align_prec": prec_align,
@@ -1122,12 +1160,14 @@ def run_experiments(clean_df: pd.DataFrame, coverages: List[float]) -> List[Dict
             tbr_fit_str = f"{r['tbr_fit']:.4f}" if r['tbr_fit'] is not None else "N/A"
             tbr_fitting_str = f"{r['tbr_fitting']:.1f}" if r['tbr_fitting'] is not None else "N/A"
             tbr_prec_str = f"{r['tbr_prec']:.3f}" if r['tbr_prec'] is not None else "N/A"
+            tbr_gen_str = f"{r['tbr_gen']:.3f}" if r['tbr_gen'] is not None else "N/A"
             
             base_str = (
                 f"cov={r['coverage']:.2f} | "
                 f"disc={r['disc_traces']} | "
                 f"TBR_fit={tbr_fit_str} ({tbr_fitting_str}%) | "
                 f"TBR_prec={tbr_prec_str} | "
+                f"TBR_gen={tbr_gen_str} | "
                 f"Simpl_nodes={r['simplicity_nodes']} | "
                 f"Simpl_dens={r['simplicity_density']:.3f} | "
                 f"Flex={r['flexibility']:.3f}"
@@ -1170,12 +1210,14 @@ def run_experiments(clean_df: pd.DataFrame, coverages: List[float]) -> List[Dict
         rec_tbr_fit_str = f"{recommended['tbr_fit']:.4f}" if recommended['tbr_fit'] is not None else "N/A"
         rec_tbr_fitting_str = f"{recommended['tbr_fitting']:.1f}" if recommended['tbr_fitting'] is not None else "N/A"
         rec_tbr_prec_str = f"{recommended['tbr_prec']:.3f}" if recommended['tbr_prec'] is not None else "N/A"
+        rec_tbr_gen_str = f"{recommended['tbr_gen']:.3f}" if recommended['tbr_gen'] is not None else "N/A"
         
         base_str = (
             f"cov={recommended['coverage']:.2f} | "
             f"disc={recommended['disc_traces']} | "
             f"TBR_fit={rec_tbr_fit_str} ({rec_tbr_fitting_str}%) | "
             f"TBR_prec={rec_tbr_prec_str} | "
+            f"TBR_gen={rec_tbr_gen_str} | "
             f"Simpl_nodes={recommended['simplicity_nodes']} | "
             f"Simpl_dens={recommended['simplicity_density']:.3f} | "
             f"Flex={recommended['flexibility']:.3f}"
