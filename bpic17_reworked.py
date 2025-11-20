@@ -73,7 +73,7 @@ INDUCTIVE_MINER_VARIANT = "IM"
 #   0.0  -> No filtering (keep all activities) (default)
 #   0.05 -> Filter activities appearing in < 5% of cases 
 #   0.10 -> More aggressive filtering
-NOISE_THRESHOLD = 0.05
+NOISE_THRESHOLD = 0.0
 
 # Output directories
 OUTPUT_DIR = "petri_nets"   # For Petri net visualizations
@@ -1279,7 +1279,7 @@ def main():
     if ALIGNMENTS_ENABLED:
         #coverages = [0.55, 0.50, 0.45, 0.40, 0.35]
         #coverages = [0.60, 0.30, 0.20, 0.10, 0.01]
-        coverages = [1.00, 0.60, 0.30, 0.20, 0.10, 0.01]
+        coverages = [1.00, 0.60, 0.55, 0.30, 0.20, 0.10, 0.01]
     else:
         coverages = [1.00, 0.60, 0.30, 0.10, 0.01]
     
