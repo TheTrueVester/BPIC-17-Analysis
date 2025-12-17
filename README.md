@@ -15,6 +15,7 @@ The chosen model with it's BPMN model, Petri-Net model and result stats can be f
 - **Model Evaluation**: Flexibility, simplicity, and structural metrics
 - **Parallel Processing**: True CPU parallelism for multiple coverage experiments
 - **Visualization**: Automatic Petri net and BPMN generation with unique filenames
+- **Activity Processing Time Analysis**: Probability distribution fitting and ML-based prediction models (see `activity_processing_time_analysis.py`)
 
 ## Requirements
 
@@ -27,6 +28,7 @@ The chosen model with it's BPMN model, Petri-Net model and result stats can be f
 - pandas
 - numpy
 - graphviz
+- scikit-learn (for activity processing time analysis)
 
 ## Installation
 
@@ -307,6 +309,48 @@ BPPSO/
 │   └── heuristics/         
 └── venv/                   # Virtual environment (optional)
 ```
+
+## Activity Processing Time Analysis
+
+A separate script (`activity_processing_time_analysis.py`) provides comprehensive analysis of activity processing times using two approaches:
+
+### 1. Probability Distribution Fitting
+- Fits multiple distributions (lognormal, gamma, exponential, normal) to historical processing times
+- Provides goodness-of-fit statistics (KS test)
+- Generates visualizations with histograms and fitted curves
+- **Use case**: Process simulation, capacity planning, uncertainty modeling
+
+### 2. Machine Learning Point Estimation
+- Trains regression models (Random Forest, Gradient Boosting, Ridge) to predict processing times
+- Uses contextual features: activity type, previous activity, temporal data, event position
+- Reports performance metrics (MAE, RMSE, R²) and feature importance
+- **Use case**: Dynamic prediction, process optimization, resource allocation
+
+### Running the Analysis
+
+```bash
+python activity_processing_time_analysis.py
+```
+
+### Output
+
+The script generates:
+- CSV files with statistics, distribution parameters, and model results
+- Distribution plots for top activities
+- Feature importance visualizations
+- Model comparison charts
+- Comprehensive text report
+
+All outputs are saved to the `results/` directory.
+
+**For detailed documentation**, see [ACTIVITY_PROCESSING_TIME_README.md](ACTIVITY_PROCESSING_TIME_README.md)
+
+### Key Results (BPI Challenge 2017)
+
+- **Best-fit distributions**: Lognormal and gamma distributions fit most activities well
+- **ML performance**: Random Forest achieves R² ≈ 0.60 with MAE ≈ 9.7 hours
+- **Top predictors**: Activity type (58%), previous activity (23%), event position (17%)
+- **High variability**: Processing times show significant variance with long tails
 
 ## Citation
 
