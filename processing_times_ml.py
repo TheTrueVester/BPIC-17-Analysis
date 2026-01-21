@@ -16,9 +16,8 @@ DISTS = {
     "expon": stats.expon,
 }
 
-# ------------------------------------------------------------------
-# 1. Build processing-time samples directly from XES
-# ------------------------------------------------------------------
+# build processing-time samples directly from XES
+
 def extract_samples(xes_path):
     log = xes_importer.apply(xes_path)
     rows = []
@@ -48,9 +47,8 @@ def extract_samples(xes_path):
 
     return pd.DataFrame(rows)
 
-# ------------------------------------------------------------------
-# 2. Fit probability distributions per activity
-# ------------------------------------------------------------------
+# fit probability distributions per activity
+
 def fit_distributions(df, min_n=50):
     out = {}
     for act, g in df.groupby("activity"):
@@ -80,9 +78,8 @@ def fit_distributions(df, min_n=50):
 
     return out
 
-# ------------------------------------------------------------------
-# 3. Train simple ML point-estimation model
-# ------------------------------------------------------------------
+# train ml point estimation model
+
 def train_ml(df):
     X = df[["activity", "prev_activity", "pos", "case_len", "hour", "weekday", "month"]]
     y = np.log1p(df["duration_sec"].to_numpy())
@@ -111,9 +108,6 @@ def train_ml(df):
         "n_test": int(len(Xte)),
     }
 
-# ------------------------------------------------------------------
-# Main
-# ------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--xes", default="data/BPI_Challenge_2017.xes.gz")
