@@ -2,8 +2,6 @@
 
 Comprehensive process discovery, conformance checking, and model evaluation tool for the BPI Challenge 2017 dataset.
 
-**FYI:** The commit count in this repository is relatively low because the project was largely developed before being uploaded to GitHub. Most of the work existed locally and was pushed only once it was nearly complete.
-
 The chosen model with it's BPMN model, Petri-Net model and result stats can be found in the Chosen Model folder.
 
 ## Features
@@ -321,3 +319,4 @@ This project is for academic/research purposes.
 ## Contact
 
 For issues or questions, please create an issue in the repository.
+
